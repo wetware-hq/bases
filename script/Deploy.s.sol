@@ -6,7 +6,7 @@ import {Bases} from "../src/Bases.sol";
 
 contract Deploy is Script {
     function run() external returns (Bases bases) {
-        string memory wiki = vm.envOr("BASES_WIKI", string("https://helix.example/wiki/dna:"));
+        string memory wiki = vm.envString("BASES_WIKI");
         vm.startBroadcast();
         bases = new Bases(wiki);
         vm.stopBroadcast();
