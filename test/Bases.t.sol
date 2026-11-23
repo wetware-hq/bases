@@ -29,7 +29,7 @@ contract BasesTest is Test {
     function test_MintStoresGenesis() public {
         uint256 id = _mint(alice);
         bytes32 genesis = sha256(abi.encodePacked(sha256("bases/1"), A));
-        assertEq(id, uint256(genesis));
+        assertEq(id, uint256(genesis) >> 128);
         assertEq(bases.ownerOf(id), alice);
         assertEq(bases.rootOf(id), genesis);
         assertEq(bases.lengthOf(id), 4);
@@ -38,7 +38,7 @@ contract BasesTest is Test {
     function test_MintEmits() public {
         bytes32 genesis = bases.extend(bases.EMPTY_ROOT(), A);
         vm.expectEmit(address(bases));
-        emit Bases.Polymerized(uint256(genesis), bases.EMPTY_ROOT(), genesis, A, 4, 4);
+        emit Bases.Polymerized(uint256(genesis) >> 128, bases.EMPTY_ROOT(), genesis, A, 4, 4);
         _mint(alice);
     }
 
@@ -66,7 +66,7 @@ contract BasesTest is Test {
         assertEq(root, sha256(abi.encodePacked(parent, B)));
         assertEq(bases.rootOf(id), root);
         assertEq(bases.lengthOf(id), 12);
-        assertEq(id, uint256(parent), "id stays the genesis root");
+        assertEq(id, uint256(parent) >> 128, "id stays the genesis root");
     }
 
     function test_NonHolderCannotPolymerize() public {
@@ -107,7 +107,7 @@ contract BasesTest is Test {
     function test_TokenURIIsHelixPage() public {
         uint256 id = _mint(alice);
         string memory hexId = vm.toString(bytes32(id));
-        string memory want = string.concat("https://helix.example/wiki/dna:", _slice(hexId, 2, 34));
+        string memory want = string.concat("https://helix.example/wiki/dna:", _slice(hexId, 34, 66));
         assertEq(bases.tokenURI(id), want);
         assertEq(bytes(bases.locus(id)).length, 32);
     }

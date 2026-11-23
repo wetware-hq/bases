@@ -35,11 +35,11 @@ contract Bases is ERC721 {
         return sha256(abi.encodePacked(parent, chunk));
     }
 
-    /// @notice Mint a new chromosome from its first chunk. The token id is the genesis root.
+    /// @notice Mint a new chromosome from its first chunk. The token id is the first 16 bytes of the genesis root.
     function mint(address to, bytes32 chunk, uint64 added) external returns (uint256 id) {
         if (added == 0) revert EmptyChunk();
         bytes32 root = extend(EMPTY_ROOT, chunk);
-        id = uint256(root);
+        id = uint256(root) >> 128;
         _chromosomes[id] = Chromosome(root, added);
         emit Polymerized(id, EMPTY_ROOT, root, chunk, added, added);
         _safeMint(to, id);
@@ -68,12 +68,12 @@ contract Bases is ERC721 {
         return _chromosomes[id].length;
     }
 
-    /// @notice helix page ID reference: the first 16 bytes of the token id as 32 lowercase hex chars.
+    /// @notice helix page ID reference: the 128-bit token id as 32 lowercase hex chars.
     function locus(uint256 id) public pure returns (string memory) {
         bytes memory out = new bytes(32);
         bytes16 digits = "0123456789abcdef";
         for (uint256 i = 0; i < 32; i++) {
-            out[i] = digits[(id >> (252 - 4 * i)) & 0xf];
+            out[i] = digits[(id >> (124 - 4 * i)) & 0xf];
         }
         return string(out);
     }

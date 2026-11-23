@@ -18,13 +18,13 @@ A chromosome is a word of bases that only grows at its 3' end, like a polymerase
 chunk          = sha256(bases of one chunk)          # computed off-chain; bases never go on-chain
 root(empty)    = sha256("bases/1")                    # EMPTY_ROOT
 root(w . c)    = sha256(root(w) || chunk(c))           # extend(parent, chunk)
-id             = uint256(root after the first chunk)  # genesis root; never changes
+id             = first 16 bytes of the root after the first chunk  # 128 bits; never changes
 ```
 
-- `mint(to, chunk, added)` makes a new chromosome from its first chunk. The same first chunk cannot be minted twice.
+- `mint(to, chunk, added)` makes a new chromosome from its first chunk. The same first chunk cannot be minted twice, and neither can two first chunks whose roots share 16 bytes.
 - `polymerize(id, chunk, added)` appends one chunk. Only the holder or an approved operator may call it. Every step emits `Polymerized(id, parent, root, chunk, added, length)`, so each old root is a prefix of the next.
 - Nothing is burned or rewritten. Transfers are plain ERC-721.
-- `tokenURI(id)` is the helix page `<wiki>dna:<locus(id)>`, where `locus` is the first 16 bytes of `id` as 32 lowercase hex characters ([wetware-hq/helix](https://github.com/wetware-hq/helix)).
+- `tokenURI(id)` is the helix page `<wiki>dna:<locus(id)>`, where `locus(id)` is `id` as 32 lowercase hex characters, so the helix ID and the token id are the same number ([wetware-hq/helix](https://github.com/wetware-hq/helix)).
 
 Anyone holding the sequence can recompute every root and check it against the chain. Anyone without it learns only the length.
 
