@@ -15,7 +15,7 @@ A chromosome is a word of bases that only grows at its 3' end, like a polymerase
 | holder | standard ERC-721 owner |
 
 ```text
-chunk          = sha256(bases of one chunk)          # computed off-chain; bases never go on-chain
+chunk          = sha256(salt || bases of one chunk)  # computed off-chain; bases never go on-chain
 root(empty)    = sha256("bases/1")                    # EMPTY_ROOT
 root(w . c)    = sha256(root(w) || chunk(c))           # extend(parent, chunk)
 id             = first 16 bytes of the root after the first chunk  # 128 bits; never changes
@@ -26,7 +26,7 @@ id             = first 16 bytes of the root after the first chunk  # 128 bits; n
 - Nothing is burned or rewritten. Transfers are plain ERC-721.
 - `tokenURI(id)` is the helix page `<wiki>dna:<locus(id)>`, where `locus(id)` is `id` as 32 lowercase hex characters, so the helix ID and the token id are the same number ([wetware-hq/helix](https://github.com/wetware-hq/helix)).
 
-Anyone holding the sequence can recompute every root and check it against the chain. Anyone without it learns only the length.
+Each `chunk` digest is public, so a short chunk hashed without a secret salt can be guessed by brute force. Use a random 32-byte salt per chunk and keep it with the sequence. Anyone holding the sequence and salts can recompute every root and check it against the chain. Anyone without it learns only the length.
 
 ## Use
 
@@ -40,11 +40,11 @@ forge test
 Deploy (Base Sepolia, `eip155:84532`, first; mainnet only once approved):
 
 ```sh
-BASES_WIKI="https://helix.example/wiki/dna:" \
+BASES_WIKI="https://<helix host>/wiki/dna:" \
 forge script script/Deploy.s.sol --rpc-url "$BASE_RPC_URL" --private-key "$DEPLOYER_KEY" --broadcast
 ```
 
-No deployment exists yet.
+`BASES_WIKI` is required and fixed at deploy time. No deployment exists yet.
 
 ## Layout
 
