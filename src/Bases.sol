@@ -23,7 +23,7 @@ contract Bases is ERC721 {
 
     string private _wiki;
     mapping(uint256 => Chromosome) private _chromosomes;
-    mapping(bytes32 => uint256) private _commits;
+    mapping(address => mapping(bytes32 => uint256)) private _commits;
 
     event Sealed(bytes32 indexed seal, address indexed by);
     event Committed(uint256 indexed id, bytes32 root, uint64 length);
@@ -48,16 +48,19 @@ contract Bases is ERC721 {
     }
 
     /// @notice Step 1 of a mint: commit `sealOf(msg.sender, to, root, length, secret)` without revealing the root.
+    ///         Commits are kept per caller, so a copied seal committed by someone else does not block or move
+    ///         this one. An expired seal can be committed again.
     function commit(bytes32 seal) external {
         if (seal == bytes32(0)) revert EmptySeal();
-        if (_commits[seal] != 0) revert AlreadySealed(seal);
-        _commits[seal] = block.timestamp;
+        uint256 at = _commits[msg.sender][seal];
+        if (at != 0 && block.timestamp <= at + MAX_COMMIT_AGE) revert AlreadySealed(seal);
+        _commits[msg.sender][seal] = block.timestamp;
         emit Sealed(seal, msg.sender);
     }
 
-    /// @notice When a seal was committed (0 if unknown or already revealed).
-    function committedAt(bytes32 seal) external view returns (uint256) {
-        return _commits[seal];
+    /// @notice When `by` committed `seal` (0 if unknown or already revealed).
+    function committedAt(address by, bytes32 seal) external view returns (uint256) {
+        return _commits[by][seal];
     }
 
     /// @notice Step 2 of a mint: reveal a sealed chromosome between `MIN_COMMIT_AGE` and `MAX_COMMIT_AGE` after
@@ -65,11 +68,11 @@ contract Bases is ERC721 {
     function mint(address to, bytes32 root, uint64 length, bytes32 secret) external returns (uint256 id) {
         if (length == 0) revert EmptySequence();
         bytes32 seal = sealOf(msg.sender, to, root, length, secret);
-        uint256 at = _commits[seal];
+        uint256 at = _commits[msg.sender][seal];
         if (at == 0) revert UnknownSeal(seal);
         if (block.timestamp < at + MIN_COMMIT_AGE) revert SealTooNew(seal, at + MIN_COMMIT_AGE);
         if (block.timestamp > at + MAX_COMMIT_AGE) revert SealExpired(seal);
-        delete _commits[seal];
+        delete _commits[msg.sender][seal];
         id = uint256(root) >> 128;
         _chromosomes[id] = Chromosome(root, length, 0, root);
         emit Committed(id, root, length);

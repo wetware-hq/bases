@@ -161,15 +161,48 @@ contract BasesTest is Test {
         emit Bases.Sealed(seal, alice);
         vm.prank(alice);
         bases.commit(seal);
-        assertEq(bases.committedAt(seal), block.timestamp);
+        assertEq(bases.committedAt(alice, seal), block.timestamp);
     }
 
     function test_EmptyOrRepeatSealReverts() public {
         vm.expectRevert(Bases.EmptySeal.selector);
         bases.commit(bytes32(0));
         bytes32 seal = _seal(alice, alice, ROOT, 4);
+        vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Bases.AlreadySealed.selector, seal));
         bases.commit(seal);
+    }
+
+    function test_ThirdPartyCommitDoesNotBlockMinter() public {
+        bytes32 seal = bases.sealOf(alice, alice, ROOT, 4, SECRET);
+        vm.prank(bob);
+        bases.commit(seal);
+        vm.warp(vm.getBlockTimestamp() + 10);
+        vm.prank(alice);
+        bases.commit(seal);
+        assertEq(bases.committedAt(alice, seal), vm.getBlockTimestamp());
+        vm.warp(vm.getBlockTimestamp() + bases.MIN_COMMIT_AGE() - 1);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Bases.SealTooNew.selector, seal, vm.getBlockTimestamp() + 1));
+        bases.mint(alice, ROOT, 4, SECRET);
+        vm.warp(vm.getBlockTimestamp() + 1);
+        vm.prank(alice);
+        assertEq(bases.mint(alice, ROOT, 4, SECRET), uint256(ROOT) >> 128);
+    }
+
+    function test_ExpiredSealCanBeRecommitted() public {
+        bytes32 seal = _seal(alice, alice, ROOT, 4);
+        vm.warp(vm.getBlockTimestamp() + bases.MAX_COMMIT_AGE());
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Bases.AlreadySealed.selector, seal));
+        bases.commit(seal);
+        vm.warp(vm.getBlockTimestamp() + 1);
+        vm.prank(alice);
+        bases.commit(seal);
+        vm.warp(vm.getBlockTimestamp() + bases.MIN_COMMIT_AGE());
+        vm.prank(alice);
+        bases.mint(alice, ROOT, 4, SECRET);
+        assertEq(bases.committedAt(alice, seal), 0);
     }
 
     function test_MintWithoutCommitReverts() public {
@@ -219,7 +252,7 @@ contract BasesTest is Test {
         vm.warp(vm.getBlockTimestamp() + bases.MIN_COMMIT_AGE());
         vm.prank(alice);
         bases.mint(alice, ROOT, 4, SECRET);
-        assertEq(bases.committedAt(seal), 0);
+        assertEq(bases.committedAt(alice, seal), 0);
     }
 
     function test_MintToOtherRecipient() public {

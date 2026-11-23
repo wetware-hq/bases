@@ -23,7 +23,7 @@ id   = first 16 bytes of root   # 128 bits; never changes
 
 Minting takes two transactions, so a root waiting in the mempool cannot be copied and minted first:
 
-1. `commit(seal)` with `seal = sealOf(minter, to, root, length, secret)` = `keccak256(abi.encode(minter, to, root, length, secret))`. Reveals nothing about the root. Emits `Sealed(seal, minter)`.
+1. `commit(seal)` with `seal = sealOf(minter, to, root, length, secret)` = `keccak256(abi.encode(minter, to, root, length, secret))`. Reveals nothing about the root. Commits are kept per minter, so someone copying a pending seal cannot block or move it; an expired seal can be committed again. Emits `Sealed(seal, minter)`.
 2. `mint(to, root, length, secret)`, sent by the same minter between 1 minute (`MIN_COMMIT_AGE`) and 1 day (`MAX_COMMIT_AGE`) after the commit. The seal binds the caller and recipient, so a copied reveal from another address has no commit. The seal is spent on mint. Root and length can never change. The same root cannot be minted twice, and neither can two roots that share their first 16 bytes. Emits `Committed(id, root, length)`.
 
 - `polymerize(id, receipt)` records one print of the committed sequence; `receipt` is a digest of the off-chain print record. Only the holder or an approved operator may call it. Emits `Polymerized(id, by, receipt, prints, head)`. The sequence does not change, and the chain does not check that a print happened: the receipt is the holder's record.
