@@ -13,6 +13,7 @@ A chromosome's sequence is fixed once committed. Polymerizable means printable: 
 | `root` | commitment to the whole sequence | never |
 | `length` | total bases | never |
 | `prints` | prints recorded so far | +1 per `polymerize` |
+| `head` | tip of the print chain, starts at `root` | each `polymerize` |
 | holder | standard ERC-721 owner | on transfer |
 
 ```text
@@ -20,8 +21,13 @@ root = sha256(salt || bases)    # computed off-chain; bases never go on-chain
 id   = first 16 bytes of root   # 128 bits; never changes
 ```
 
-- `mint(to, root, length)` commits a chromosome. Root and length can never change. The same root cannot be minted twice, and neither can two roots that share their first 16 bytes. Emits `Committed(id, root, length)`.
-- `polymerize(id, receipt)` records one print of the committed sequence; `receipt` is a digest of the off-chain print record. Only the holder or an approved operator may call it. Emits `Polymerized(id, by, receipt, prints)`. The sequence does not change, and the chain does not check that a print happened: the receipt is the holder's record.
+Minting takes two transactions, so a root waiting in the mempool cannot be copied and minted first:
+
+1. `commit(seal)` with `seal = sealOf(minter, to, root, length, secret)` = `keccak256(abi.encode(minter, to, root, length, secret))`. Reveals nothing about the root. Emits `Sealed(seal, minter)`.
+2. `mint(to, root, length, secret)`, sent by the same minter between 1 minute (`MIN_COMMIT_AGE`) and 1 day (`MAX_COMMIT_AGE`) after the commit. The seal binds the caller and recipient, so a copied reveal from another address has no commit. The seal is spent on mint. Root and length can never change. The same root cannot be minted twice, and neither can two roots that share their first 16 bytes. Emits `Committed(id, root, length)`.
+
+- `polymerize(id, receipt)` records one print of the committed sequence; `receipt` is a digest of the off-chain print record. Only the holder or an approved operator may call it. Emits `Polymerized(id, by, receipt, prints, head)`. The sequence does not change, and the chain does not check that a print happened: the receipt is the holder's record.
+- Prints form a hash chain: `head = keccak256(head || receipt)`, starting from `root`. `headOf(id)` is the tip, so anyone holding the receipt list can replay it from `root` and check it against one on-chain value, without an indexer.
 - Nothing is burned or rewritten. Transfers are plain ERC-721, and the new holder gets the right to record prints.
 - `tokenURI(id)` is the helix page `<wiki>dna:<locus(id)>`, where `locus(id)` is `id` as 32 lowercase hex characters, so the helix ID and the token id are the same number ([wetware-hq/helix](https://github.com/wetware-hq/helix)).
 

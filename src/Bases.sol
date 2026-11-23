@@ -13,39 +13,81 @@ contract Bases is ERC721 {
         bytes32 root;
         uint64 length;
         uint64 prints;
+        bytes32 head;
     }
+
+    /// @notice A sealed commit must be at least this old before it can be revealed by `mint`.
+    uint256 public constant MIN_COMMIT_AGE = 1 minutes;
+    /// @notice A sealed commit older than this can no longer be revealed.
+    uint256 public constant MAX_COMMIT_AGE = 1 days;
 
     string private _wiki;
     mapping(uint256 => Chromosome) private _chromosomes;
+    mapping(bytes32 => uint256) private _commits;
 
+    event Sealed(bytes32 indexed seal, address indexed by);
     event Committed(uint256 indexed id, bytes32 root, uint64 length);
-    event Polymerized(uint256 indexed id, address indexed by, bytes32 receipt, uint64 prints);
+    event Polymerized(uint256 indexed id, address indexed by, bytes32 receipt, uint64 prints, bytes32 head);
 
     error EmptySequence();
     error EmptyReceipt();
+    error EmptySeal();
+    error AlreadySealed(bytes32 seal);
+    error UnknownSeal(bytes32 seal);
+    error SealTooNew(bytes32 seal, uint256 revealableAt);
+    error SealExpired(bytes32 seal);
 
     /// @param wiki URI prefix for token metadata, e.g. "https://helix.example/wiki/dna:".
     constructor(string memory wiki) ERC721("Bases", "BASES") {
         _wiki = wiki;
     }
 
-    /// @notice Commit a chromosome. `root` = sha256(salt || bases), computed off-chain. The token id is its first 16 bytes.
-    function mint(address to, bytes32 root, uint64 length) external returns (uint256 id) {
+    /// @notice The seal a minter commits before revealing: it binds the caller, recipient, root, length and a secret.
+    function sealOf(address by, address to, bytes32 root, uint64 length, bytes32 secret) public pure returns (bytes32) {
+        return keccak256(abi.encode(by, to, root, length, secret));
+    }
+
+    /// @notice Step 1 of a mint: commit `sealOf(msg.sender, to, root, length, secret)` without revealing the root.
+    function commit(bytes32 seal) external {
+        if (seal == bytes32(0)) revert EmptySeal();
+        if (_commits[seal] != 0) revert AlreadySealed(seal);
+        _commits[seal] = block.timestamp;
+        emit Sealed(seal, msg.sender);
+    }
+
+    /// @notice When a seal was committed (0 if unknown or already revealed).
+    function committedAt(bytes32 seal) external view returns (uint256) {
+        return _commits[seal];
+    }
+
+    /// @notice Step 2 of a mint: reveal a sealed chromosome between `MIN_COMMIT_AGE` and `MAX_COMMIT_AGE` after
+    ///         its commit. `root` = sha256(salt || bases), computed off-chain. The token id is its first 16 bytes.
+    function mint(address to, bytes32 root, uint64 length, bytes32 secret) external returns (uint256 id) {
         if (length == 0) revert EmptySequence();
+        bytes32 seal = sealOf(msg.sender, to, root, length, secret);
+        uint256 at = _commits[seal];
+        if (at == 0) revert UnknownSeal(seal);
+        if (block.timestamp < at + MIN_COMMIT_AGE) revert SealTooNew(seal, at + MIN_COMMIT_AGE);
+        if (block.timestamp > at + MAX_COMMIT_AGE) revert SealExpired(seal);
+        delete _commits[seal];
         id = uint256(root) >> 128;
-        _chromosomes[id] = Chromosome(root, length, 0);
+        _chromosomes[id] = Chromosome(root, length, 0, root);
         emit Committed(id, root, length);
         _safeMint(to, id);
     }
 
     /// @notice Record one print of the committed sequence. `receipt` is a digest of the off-chain print record.
-    ///         Only the holder or an approved operator may call. The sequence does not change.
+    ///         Only the holder or an approved operator may call. The sequence does not change. Each print
+    ///         extends the token's print chain: head = keccak256(head || receipt), starting from root.
     function polymerize(uint256 id, bytes32 receipt) external returns (uint64 prints) {
         if (receipt == bytes32(0)) revert EmptyReceipt();
         address holder = _requireOwned(id);
         _checkAuthorized(holder, msg.sender, id);
-        prints = ++_chromosomes[id].prints;
-        emit Polymerized(id, msg.sender, receipt, prints);
+        Chromosome storage c = _chromosomes[id];
+        prints = ++c.prints;
+        bytes32 head = keccak256(abi.encodePacked(c.head, receipt));
+        c.head = head;
+        emit Polymerized(id, msg.sender, receipt, prints, head);
     }
 
     function rootOf(uint256 id) external view returns (bytes32) {
@@ -61,6 +103,12 @@ contract Bases is ERC721 {
     function printsOf(uint256 id) external view returns (uint64) {
         _requireOwned(id);
         return _chromosomes[id].prints;
+    }
+
+    /// @notice Tip of the print chain: equals `rootOf(id)` until the first print.
+    function headOf(uint256 id) external view returns (bytes32) {
+        _requireOwned(id);
+        return _chromosomes[id].head;
     }
 
     /// @notice helix page ID reference: the 128-bit token id as 32 lowercase hex chars.
