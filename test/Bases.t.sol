@@ -12,14 +12,27 @@ contract BasesTest is Test {
 
     bytes32 constant ROOT = keccak256("salt || ACGT");
     bytes32 constant RECEIPT = keccak256("print record 1");
+    bytes32 constant SECRET = keccak256("secret");
 
     function setUp() public {
         bases = new Bases("https://helix.example/wiki/dna:");
     }
 
+    function _mintAs(address by, address to, bytes32 root, uint64 length) internal returns (uint256) {
+        _seal(by, to, root, length);
+        vm.warp(vm.getBlockTimestamp() + bases.MIN_COMMIT_AGE());
+        vm.prank(by);
+        return bases.mint(to, root, length, SECRET);
+    }
+
+    function _seal(address by, address to, bytes32 root, uint64 length) internal returns (bytes32 seal) {
+        seal = bases.sealOf(by, to, root, length, SECRET);
+        vm.prank(by);
+        bases.commit(seal);
+    }
+
     function _mint(address to) internal returns (uint256) {
-        vm.prank(to);
-        return bases.mint(to, ROOT, 4);
+        return _mintAs(to, to, ROOT, 4);
     }
 
     function test_MintCommitsSequence() public {
@@ -29,25 +42,35 @@ contract BasesTest is Test {
         assertEq(bases.rootOf(id), ROOT);
         assertEq(bases.lengthOf(id), 4);
         assertEq(bases.printsOf(id), 0);
+        assertEq(bases.headOf(id), ROOT);
     }
 
     function test_MintEmits() public {
+        _seal(alice, alice, ROOT, 4);
+        vm.warp(vm.getBlockTimestamp() + bases.MIN_COMMIT_AGE());
         vm.expectEmit(address(bases));
         emit Bases.Committed(uint256(ROOT) >> 128, ROOT, 4);
-        _mint(alice);
+        vm.prank(alice);
+        bases.mint(alice, ROOT, 4, SECRET);
     }
 
     function test_DuplicateMintReverts() public {
         uint256 id = _mint(alice);
+        _seal(bob, bob, ROOT, 8);
+        vm.warp(vm.getBlockTimestamp() + bases.MIN_COMMIT_AGE());
+        vm.prank(bob);
         vm.expectRevert(abi.encodeWithSelector(IERC721Errors.ERC721InvalidSender.selector, address(0)));
-        bases.mint(bob, ROOT, 8);
+        bases.mint(bob, ROOT, 8, SECRET);
         assertEq(bases.ownerOf(id), alice);
         assertEq(bases.lengthOf(id), 4);
     }
 
     function test_ZeroLengthReverts() public {
+        _seal(alice, alice, ROOT, 0);
+        vm.warp(vm.getBlockTimestamp() + bases.MIN_COMMIT_AGE());
+        vm.prank(alice);
         vm.expectRevert(Bases.EmptySequence.selector);
-        bases.mint(alice, ROOT, 0);
+        bases.mint(alice, ROOT, 0, SECRET);
     }
 
     function test_EmptyReceiptReverts() public {
@@ -60,7 +83,7 @@ contract BasesTest is Test {
     function test_PolymerizeRecordsPrintAndKeepsSequence() public {
         uint256 id = _mint(alice);
         vm.expectEmit(address(bases));
-        emit Bases.Polymerized(id, alice, RECEIPT, 1);
+        emit Bases.Polymerized(id, alice, RECEIPT, 1, keccak256(abi.encodePacked(ROOT, RECEIPT)));
         vm.prank(alice);
         assertEq(bases.polymerize(id, RECEIPT), 1);
         vm.prank(alice);
@@ -82,7 +105,7 @@ contract BasesTest is Test {
         vm.prank(alice);
         bases.approve(bob, id);
         vm.expectEmit(address(bases));
-        emit Bases.Polymerized(id, bob, RECEIPT, 1);
+        emit Bases.Polymerized(id, bob, RECEIPT, 1, keccak256(abi.encodePacked(ROOT, RECEIPT)));
         vm.prank(bob);
         bases.polymerize(id, RECEIPT);
     }
@@ -121,8 +144,10 @@ contract BasesTest is Test {
     }
 
     function test_MintToNonReceiverReverts() public {
+        _seal(address(this), address(this), ROOT, 4);
+        vm.warp(vm.getBlockTimestamp() + bases.MIN_COMMIT_AGE());
         vm.expectRevert(abi.encodeWithSelector(IERC721Errors.ERC721InvalidReceiver.selector, address(this)));
-        bases.mint(address(this), ROOT, 4);
+        bases.mint(address(this), ROOT, 4, SECRET);
     }
 
     function test_Metadata() public view {
@@ -130,17 +155,137 @@ contract BasesTest is Test {
         assertEq(bases.symbol(), "BASES");
     }
 
+    function test_CommitEmitsAndRecordsTime() public {
+        bytes32 seal = bases.sealOf(alice, alice, ROOT, 4, SECRET);
+        vm.expectEmit(address(bases));
+        emit Bases.Sealed(seal, alice);
+        vm.prank(alice);
+        bases.commit(seal);
+        assertEq(bases.committedAt(alice, seal), block.timestamp);
+    }
+
+    function test_EmptyOrRepeatSealReverts() public {
+        vm.expectRevert(Bases.EmptySeal.selector);
+        bases.commit(bytes32(0));
+        bytes32 seal = _seal(alice, alice, ROOT, 4);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Bases.AlreadySealed.selector, seal));
+        bases.commit(seal);
+    }
+
+    function test_ThirdPartyCommitDoesNotBlockMinter() public {
+        bytes32 seal = bases.sealOf(alice, alice, ROOT, 4, SECRET);
+        vm.prank(bob);
+        bases.commit(seal);
+        vm.warp(vm.getBlockTimestamp() + 10);
+        vm.prank(alice);
+        bases.commit(seal);
+        assertEq(bases.committedAt(alice, seal), vm.getBlockTimestamp());
+        vm.warp(vm.getBlockTimestamp() + bases.MIN_COMMIT_AGE() - 1);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Bases.SealTooNew.selector, seal, vm.getBlockTimestamp() + 1));
+        bases.mint(alice, ROOT, 4, SECRET);
+        vm.warp(vm.getBlockTimestamp() + 1);
+        vm.prank(alice);
+        assertEq(bases.mint(alice, ROOT, 4, SECRET), uint256(ROOT) >> 128);
+    }
+
+    function test_ExpiredSealCanBeRecommitted() public {
+        bytes32 seal = _seal(alice, alice, ROOT, 4);
+        vm.warp(vm.getBlockTimestamp() + bases.MAX_COMMIT_AGE());
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Bases.AlreadySealed.selector, seal));
+        bases.commit(seal);
+        vm.warp(vm.getBlockTimestamp() + 1);
+        vm.prank(alice);
+        bases.commit(seal);
+        vm.warp(vm.getBlockTimestamp() + bases.MIN_COMMIT_AGE());
+        vm.prank(alice);
+        bases.mint(alice, ROOT, 4, SECRET);
+        assertEq(bases.committedAt(alice, seal), 0);
+    }
+
+    function test_MintWithoutCommitReverts() public {
+        bytes32 seal = bases.sealOf(alice, alice, ROOT, 4, SECRET);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Bases.UnknownSeal.selector, seal));
+        bases.mint(alice, ROOT, 4, SECRET);
+    }
+
+    function test_RevealTooSoonReverts() public {
+        bytes32 seal = _seal(alice, alice, ROOT, 4);
+        uint256 at = vm.getBlockTimestamp() + bases.MIN_COMMIT_AGE();
+        vm.warp(at - 1);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Bases.SealTooNew.selector, seal, at));
+        bases.mint(alice, ROOT, 4, SECRET);
+    }
+
+    function test_RevealAfterExpiryReverts() public {
+        bytes32 seal = _seal(alice, alice, ROOT, 4);
+        vm.warp(vm.getBlockTimestamp() + bases.MAX_COMMIT_AGE() + 1);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Bases.SealExpired.selector, seal));
+        bases.mint(alice, ROOT, 4, SECRET);
+    }
+
+    function test_CopiedRevealCannotFrontRun() public {
+        _seal(alice, alice, ROOT, 4);
+        vm.warp(vm.getBlockTimestamp() + bases.MIN_COMMIT_AGE());
+        // bob copies alice's pending reveal; the seal binds the caller, so bob's copy has no commit
+        bytes32 bobSeal = bases.sealOf(bob, bob, ROOT, 4, SECRET);
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(Bases.UnknownSeal.selector, bobSeal));
+        bases.mint(bob, ROOT, 4, SECRET);
+        // and redirecting alice's own seal to bob fails too
+        bytes32 redirected = bases.sealOf(bob, alice, ROOT, 4, SECRET);
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(Bases.UnknownSeal.selector, redirected));
+        bases.mint(alice, ROOT, 4, SECRET);
+        vm.prank(alice);
+        uint256 id = bases.mint(alice, ROOT, 4, SECRET);
+        assertEq(bases.ownerOf(id), alice);
+    }
+
+    function test_SealIsSpentOnMint() public {
+        bytes32 seal = _seal(alice, alice, ROOT, 4);
+        vm.warp(vm.getBlockTimestamp() + bases.MIN_COMMIT_AGE());
+        vm.prank(alice);
+        bases.mint(alice, ROOT, 4, SECRET);
+        assertEq(bases.committedAt(alice, seal), 0);
+    }
+
+    function test_MintToOtherRecipient() public {
+        uint256 id = _mintAs(alice, bob, ROOT, 4);
+        assertEq(bases.ownerOf(id), bob);
+    }
+
+    function test_PrintChainSurvivesTransfer() public {
+        uint256 id = _mint(alice);
+        bytes32 r2 = keccak256("print record 2");
+        vm.prank(alice);
+        bases.polymerize(id, RECEIPT);
+        vm.prank(alice);
+        bases.transferFrom(alice, bob, id);
+        vm.prank(bob);
+        bases.polymerize(id, r2);
+        bytes32 want = keccak256(abi.encodePacked(keccak256(abi.encodePacked(ROOT, RECEIPT)), r2));
+        assertEq(bases.headOf(id), want);
+    }
+
     function testFuzz_SequenceFixedUnderPrints(bytes32 root, uint64 length, bytes32[] calldata receipts) public {
         vm.assume(length > 0 && receipts.length <= 16);
-        vm.prank(alice);
-        uint256 id = bases.mint(alice, root, length);
+        uint256 id = _mintAs(alice, alice, root, length);
         uint64 n;
+        bytes32 head = root;
         for (uint256 i = 0; i < receipts.length; i++) {
             if (receipts[i] == bytes32(0)) continue;
             vm.prank(alice);
             bases.polymerize(id, receipts[i]);
+            head = keccak256(abi.encodePacked(head, receipts[i]));
             n++;
         }
+        assertEq(bases.headOf(id), head, "print chain replays from receipts");
         assertEq(bases.rootOf(id), root);
         assertEq(bases.lengthOf(id), length);
         assertEq(bases.printsOf(id), n);
