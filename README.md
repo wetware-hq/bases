@@ -6,27 +6,26 @@
 
 ## Model
 
-A chromosome is a word of bases that only grows at its 3' end, like a polymerase extending a strand. On-chain, each token stores:
+A chromosome's sequence is fixed once committed. Polymerizable means printable: the token is a real-world asset, a sequence that can be printed as physical DNA, and each print is recorded on-chain. On-chain, each token stores:
 
-| Field | Meaning |
-|---|---|
-| `root` | hash chain over the chunks added so far |
-| `length` | total bases |
-| holder | standard ERC-721 owner |
+| Field | Meaning | Changes |
+|---|---|---|
+| `root` | commitment to the whole sequence | never |
+| `length` | total bases | never |
+| `prints` | prints recorded so far | +1 per `polymerize` |
+| holder | standard ERC-721 owner | on transfer |
 
 ```text
-chunk          = sha256(salt || bases of one chunk)  # computed off-chain; bases never go on-chain
-root(empty)    = sha256("bases/1")                    # EMPTY_ROOT
-root(w . c)    = sha256(root(w) || chunk(c))           # extend(parent, chunk)
-id             = first 16 bytes of the root after the first chunk  # 128 bits; never changes
+root = sha256(salt || bases)    # computed off-chain; bases never go on-chain
+id   = first 16 bytes of root   # 128 bits; never changes
 ```
 
-- `mint(to, chunk, added)` makes a new chromosome from its first chunk. The same first chunk cannot be minted twice, and neither can two first chunks whose roots share 16 bytes.
-- `polymerize(id, chunk, added)` appends one chunk. Only the holder or an approved operator may call it. Every step emits `Polymerized(id, parent, root, chunk, added, length)`, so each old root is a prefix of the next.
-- Nothing is burned or rewritten. Transfers are plain ERC-721.
+- `mint(to, root, length)` commits a chromosome. Root and length can never change. The same root cannot be minted twice, and neither can two roots that share their first 16 bytes. Emits `Committed(id, root, length)`.
+- `polymerize(id, receipt)` records one print of the committed sequence; `receipt` is a digest of the off-chain print record. Only the holder or an approved operator may call it. Emits `Polymerized(id, by, receipt, prints)`. The sequence does not change, and the chain does not check that a print happened: the receipt is the holder's record.
+- Nothing is burned or rewritten. Transfers are plain ERC-721, and the new holder gets the right to record prints.
 - `tokenURI(id)` is the helix page `<wiki>dna:<locus(id)>`, where `locus(id)` is `id` as 32 lowercase hex characters, so the helix ID and the token id are the same number ([wetware-hq/helix](https://github.com/wetware-hq/helix)).
 
-Each `chunk` digest is public, so a short chunk hashed without a secret salt can be guessed by brute force. Use a random 32-byte salt per chunk and keep it with the sequence. Anyone holding the sequence and salts can recompute every root and check it against the chain. Anyone without it learns only the length.
+`root` is public, so a short sequence hashed without a secret salt can be guessed by brute force. Use a random 32-byte salt and keep it with the sequence. Anyone holding the sequence and salt can recompute `root` and check it against the chain. Anyone without it learns only the length.
 
 ## Use
 

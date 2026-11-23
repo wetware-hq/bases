@@ -4,58 +4,48 @@ pragma solidity 0.8.24;
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 
 /// @title Bases: synthetic chromosomes as ERC-721 tokens.
-/// @notice One token is one chromosome. The chain stores only a hash chain over the
-///         chromosome's chunks and its length in bases; no sequence is ever stored.
-///         A chromosome can only grow at its 3' end (polymerize). Nothing is burned or rewritten.
+/// @notice One token is one chromosome. Its sequence is fixed once committed at mint: the chain stores
+///         a commitment to the whole sequence and its length in bases, never the sequence, and neither
+///         ever changes. Polymerizable means printable: `polymerize` records a physical print of the
+///         committed sequence (the real-world asset). Nothing is burned or rewritten.
 contract Bases is ERC721 {
     struct Chromosome {
         bytes32 root;
         uint64 length;
+        uint64 prints;
     }
-
-    /// @dev root(empty) = sha256("bases/1")
-    bytes32 public immutable EMPTY_ROOT = sha256("bases/1");
 
     string private _wiki;
     mapping(uint256 => Chromosome) private _chromosomes;
 
-    event Polymerized(
-        uint256 indexed id, bytes32 indexed parent, bytes32 root, bytes32 chunk, uint64 added, uint64 length
-    );
+    event Committed(uint256 indexed id, bytes32 root, uint64 length);
+    event Polymerized(uint256 indexed id, address indexed by, bytes32 receipt, uint64 prints);
 
-    error EmptyChunk();
+    error EmptySequence();
+    error EmptyReceipt();
 
     /// @param wiki URI prefix for token metadata, e.g. "https://helix.example/wiki/dna:".
     constructor(string memory wiki) ERC721("Bases", "BASES") {
         _wiki = wiki;
     }
 
-    /// @notice root(w . chunk) = sha256(root(w) || chunk), where chunk = sha256(bases of the chunk).
-    function extend(bytes32 parent, bytes32 chunk) public pure returns (bytes32) {
-        return sha256(abi.encodePacked(parent, chunk));
-    }
-
-    /// @notice Mint a new chromosome from its first chunk. The token id is the first 16 bytes of the genesis root.
-    function mint(address to, bytes32 chunk, uint64 added) external returns (uint256 id) {
-        if (added == 0) revert EmptyChunk();
-        bytes32 root = extend(EMPTY_ROOT, chunk);
+    /// @notice Commit a chromosome. `root` = sha256(salt || bases), computed off-chain. The token id is its first 16 bytes.
+    function mint(address to, bytes32 root, uint64 length) external returns (uint256 id) {
+        if (length == 0) revert EmptySequence();
         id = uint256(root) >> 128;
-        _chromosomes[id] = Chromosome(root, added);
-        emit Polymerized(id, EMPTY_ROOT, root, chunk, added, added);
+        _chromosomes[id] = Chromosome(root, length, 0);
+        emit Committed(id, root, length);
         _safeMint(to, id);
     }
 
-    /// @notice Append one chunk at the 3' end. Only the holder or an approved operator may call.
-    function polymerize(uint256 id, bytes32 chunk, uint64 added) external returns (bytes32 root) {
-        if (added == 0) revert EmptyChunk();
+    /// @notice Record one print of the committed sequence. `receipt` is a digest of the off-chain print record.
+    ///         Only the holder or an approved operator may call. The sequence does not change.
+    function polymerize(uint256 id, bytes32 receipt) external returns (uint64 prints) {
+        if (receipt == bytes32(0)) revert EmptyReceipt();
         address holder = _requireOwned(id);
         _checkAuthorized(holder, msg.sender, id);
-        Chromosome storage c = _chromosomes[id];
-        bytes32 parent = c.root;
-        root = extend(parent, chunk);
-        c.root = root;
-        c.length += added;
-        emit Polymerized(id, parent, root, chunk, added, c.length);
+        prints = ++_chromosomes[id].prints;
+        emit Polymerized(id, msg.sender, receipt, prints);
     }
 
     function rootOf(uint256 id) external view returns (bytes32) {
@@ -66,6 +56,11 @@ contract Bases is ERC721 {
     function lengthOf(uint256 id) external view returns (uint64) {
         _requireOwned(id);
         return _chromosomes[id].length;
+    }
+
+    function printsOf(uint256 id) external view returns (uint64) {
+        _requireOwned(id);
+        return _chromosomes[id].prints;
     }
 
     /// @notice helix page ID reference: the 128-bit token id as 32 lowercase hex chars.
