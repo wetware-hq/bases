@@ -35,6 +35,11 @@ contract BasesTest is Test {
         return _mintAs(to, to, ROOT, 4);
     }
 
+    function test_EventTopicsMatchSolanaIssuer() public pure {
+        assertEq(Bases.Committed.selector, 0x8e3584d232d0e22e18aa185ea690a639a6c0f6830722f402e250130cfeae923d);
+        assertEq(Bases.Polymerized.selector, 0xd4d8d095c60c0dfb06f4fedf3c8ad252c56c26cb7d7e77a9ac7d1fe077b28428);
+    }
+
     function test_MintCommitsSequence() public {
         uint256 id = _mint(alice);
         assertEq(id, uint256(ROOT) >> 128);
