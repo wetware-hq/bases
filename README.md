@@ -46,10 +46,10 @@ If any check fails, the coin is refused with a code such as `unprinted`, `loop_m
 cd solana && npm ci
 npm test                                   # unit, LiteSVM, and Anvil end-to-end if Foundry is installed
 node main.ts --assets assets.json --evm-rpc "$BASE_RPC_URL" --bases 0x... --keypair ~/.config/solana/id.json \
-  [--solana-rpc https://api.devnet.solana.com] [--to <holder>] [--from-block <deploy block>] [--send]
+  [--solana-rpc https://api.devnet.solana.com] [--to <holder>] [--from-block <deploy block>] [--block finalized] [--send]
 ```
 
-`assets.json` is a list of `{"dna": "x.fa", "salt": "<64 hex>", "loop": "x.loop.txt"}`, with paths relative to the file. It holds the salts, so keep it private. Without `--send`, nothing is signed or sent: each line of output is the coin it would create, or the reason it refuses. No coin exists yet.
+`assets.json` is a list of `{"dna": "x.fa", "salt": "<64 hex>", "loop": "x.loop.txt"}`, with paths relative to the file. It holds the salts, so keep it private. Bases is read at the `finalized` block by default, so a coin never cites a print that a reorg can remove. Without `--send`, nothing is signed or sent: each line of output is the coin it would create, or the reason it refuses. No coin exists yet.
 
 `root` is public, so a short sequence hashed without a secret salt can be guessed by brute force. Use a random 32-byte salt and keep it with the sequence. Anyone holding the sequence and salt can recompute `root` and check it against the chain. Anyone without it learns only the length.
 

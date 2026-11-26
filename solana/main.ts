@@ -1,5 +1,5 @@
 // node main.ts --assets assets.json --evm-rpc URL --bases 0x... --keypair id.json [--solana-rpc URL] [--to ADDR]
-//              [--from-block N] [--send]
+//              [--from-block N] [--step N] [--block finalized|safe|latest] [--send]
 // One line of JSON per chromosome. Without --send nothing is signed or sent; it reports what it would create.
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -19,6 +19,8 @@ const { values: o } = parseArgs({
     "solana-rpc": { type: "string", default: "https://api.devnet.solana.com" },
     to: { type: "string" },
     "from-block": { type: "string", default: "0" },
+    step: { type: "string", default: "10000" },
+    block: { type: "string", default: "finalized" },
     send: { type: "boolean", default: false },
   },
 });
@@ -27,7 +29,13 @@ for (const k of ["assets", "evm-rpc", "bases", "keypair"] as const) if (!o[k]) t
 type Entry = { dna: string; salt: string; loop: string };
 const file = resolve(o.assets!);
 const entries: Entry[] = JSON.parse(readFileSync(file, "utf8"));
-const at = (p: string) => readFileSync(resolve(dirname(file), p), "utf8");
+const at = (p: string) => {
+  try {
+    return readFileSync(resolve(dirname(file), p), "utf8");
+  } catch (err) {
+    throw new Refusal("unreadable", `${p}: ${(err as NodeJS.ErrnoException).code ?? err}`);
+  }
+};
 
 const client = await createClient().use(signerFromFile(o.keypair!)).use(solanaRpc({ rpcUrl: o["solana-rpc"]! }));
 const holder = o.to ? address(o.to) : client.identity.address;
@@ -38,8 +46,9 @@ for (const e of entries) {
     if (!/^[0-9a-f]{64}$/.test(e.salt)) throw new Refusal("bad_salt", "salt must be 64 lowercase hex chars");
     const asset = { seq: readFasta(at(e.dna)), salt: Buffer.from(e.salt, "hex"), loop: readLoop(at(e.loop)) };
     const { id } = chainRoot(asset.salt, asset.seq);
-    const p = provenance(asset, await chromosome(rpc, o.bases!, id, BigInt(o["from-block"]!)));
-    const t = await token(rpc, o.bases!, id);
+    const scan = { fromBlock: BigInt(o["from-block"]!), step: BigInt(o.step!), block: o.block! };
+    const p = provenance(asset, await chromosome(rpc, o.bases!, id, scan));
+    const t = await token(rpc, o.bases!, id, o.block!);
     console.log(JSON.stringify({ dna: e.dna, ...(await issue(client, client.identity, holder, p, t, o.send)) }));
   } catch (err) {
     if (!(err instanceof Refusal)) throw err;
