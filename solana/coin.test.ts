@@ -6,7 +6,7 @@ import { describe, test } from "node:test";
 import { createClient, fetchEncodedAccount, generateKeyPairSigner, isSome, lamports, unwrapOption } from "@solana/kit";
 import { litesvm } from "@solana/kit-plugin-litesvm";
 import { airdropSigner, generatedSigner } from "@solana/kit-plugin-signer";
-import { TOKEN_2022_PROGRAM_ADDRESS, decodeMint, fetchToken, findAssociatedTokenPda } from "@solana-program/token-2022";
+import { TOKEN_2022_PROGRAM_ADDRESS, decodeMint, fetchToken, findAssociatedTokenPda, getBurnInstruction } from "@solana-program/token-2022";
 import { chromosome, evm, token } from "./chain.ts";
 import { type Asset, Refusal, chainRoot, coinAddress, issue, locus, metadata, provenance, readFasta, readLoop } from "./coin.ts";
 
@@ -161,6 +161,30 @@ describe("coin", () => {
     );
   });
 
+  test("a prefunded coin address is still issued", async () => {
+    const client = await svm();
+    const a = asset();
+    const p = provenance(a, onChain(a));
+    const coin = await coinAddress(client.identity.address, p.id);
+    await client.airdrop(coin, lamports(1_000_000n));
+    assert.equal((await issue(client, client.identity, client.identity.address, p, TOKEN)).status, "planned");
+    const made = await issue(client, client.identity, client.identity.address, p, TOKEN, true);
+    assert.equal(made.status, "created");
+    const mint = decodeMint(await fetchEncodedAccount(client.rpc, coin));
+    assert.ok(mint.exists);
+    assert.equal(mint.data.supply, 8n);
+  });
+
+  test("a coin with burned bases is still the chromosome's coin", async () => {
+    const client = await svm();
+    const a = asset();
+    const p = provenance(a, onChain(a));
+    const { coin } = await issue(client, client.identity, client.identity.address, p, TOKEN, true);
+    const [ata] = await findAssociatedTokenPda({ owner: client.identity.address, mint: coin, tokenProgram: TOKEN_2022_PROGRAM_ADDRESS });
+    await client.sendTransaction([getBurnInstruction({ account: ata, mint: coin, authority: client.identity, amount: 3n })]);
+    assert.equal((await issue(client, client.identity, client.identity.address, p, TOKEN, true)).status, "exists");
+  });
+
   test("each chromosome gets its own coin", async () => {
     const client = await svm();
     const coins = new Set<string>();
@@ -216,16 +240,16 @@ describe("bases on anvil", { skip: !ANVIL && "anvil not installed" }, () => {
 
       const client = await svm();
       const id = chainRoot(printed.salt, printed.seq).id;
-      const c = await chromosome(rpc, bases, id, 0n, 2n);
+      const c = await chromosome(rpc, bases, id, { step: 2n, block: "latest" });
       assert.equal(c.receipts.length, 2);
-      const t = await token(rpc, bases, id);
+      const t = await token(rpc, bases, id, "latest");
       assert.deepEqual(t, { chain: "eip155:31337", contract: bases, uri: wiki + locus(id) });
       const made = await issue(client, client.identity, client.identity.address, provenance(printed, c), t, true);
       assert.equal(made.status, "created");
 
-      const other = await chromosome(rpc, bases, chainRoot(unprinted.salt, unprinted.seq).id);
+      const other = await chromosome(rpc, bases, chainRoot(unprinted.salt, unprinted.seq).id, { block: "latest" });
       refuses("unprinted", () => provenance(unprinted, other));
-      await assert.rejects(chromosome(rpc, bases, 1n), (e: unknown) => e instanceof Refusal && e.code === "unknown_token");
+      await assert.rejects(chromosome(rpc, bases, 1n, { block: "latest" }), (e: unknown) => e instanceof Refusal && e.code === "unknown_token");
     } finally {
       node.kill();
     }

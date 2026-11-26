@@ -18,7 +18,13 @@ import {
   none,
   some,
 } from "@solana/kit";
-import { getCreateAccountWithSeedInstruction } from "@solana-program/system";
+import {
+  SYSTEM_PROGRAM_ADDRESS,
+  getAllocateWithSeedInstruction,
+  getAssignWithSeedInstruction,
+  getCreateAccountWithSeedInstruction,
+  getTransferSolInstruction,
+} from "@solana-program/system";
 import {
   AuthorityType,
   type Mint,
@@ -173,12 +179,6 @@ export async function issue(
 ): Promise<Issued> {
   const mint = await coinAddress(issuer.address, p.id);
   const md = metadata(p, token);
-  const account = await fetchEncodedAccount(client.rpc, mint);
-  if (account.exists) {
-    check(decodeMint(account), p, md, issuer.address);
-    return { id: locus(p.id), coin: mint, status: "exists" };
-  }
-  if (!send) return { id: locus(p.id), coin: mint, status: "planned" };
   const exts = [
     extension("MetadataPointer", { authority: none(), metadataAddress: some(mint) }),
     extension("TokenMetadata", {
@@ -190,17 +190,45 @@ export async function issue(
       additionalMetadata: new Map(md.fields),
     }),
   ];
+  const account = await fetchEncodedAccount(client.rpc, mint);
+  if (account.exists && account.programAddress === TOKEN_2022_PROGRAM_ADDRESS) {
+    let decoded: Account<Mint>;
+    try {
+      decoded = decodeMint(account);
+    } catch {
+      throw new Refusal("coin_mismatch", `${mint} is not a mint`);
+    }
+    check(decoded, p, md);
+    return { id: locus(p.id), coin: mint, status: "exists" };
+  }
+  // Anyone can send lamports to the coin's address first; an empty system account is still ours to allocate.
+  if (account.exists && (account.programAddress !== SYSTEM_PROGRAM_ADDRESS || account.data.length > 0)) {
+    throw new Refusal("coin_mismatch", `${mint} is owned by ${account.programAddress}`);
+  }
+  if (!send) return { id: locus(p.id), coin: mint, status: "planned" };
+  const seed = locus(p.id);
+  const rent = await client.getMinimumBalance(getMintSize(exts));
+  const space = getMintSize(exts.slice(0, 1));
+  const create: Instruction[] = account.exists
+    ? [
+        ...(account.lamports < rent ? [getTransferSolInstruction({ source: issuer, destination: mint, amount: rent - account.lamports })] : []),
+        getAllocateWithSeedInstruction({ newAccount: mint, baseAccount: issuer, base: issuer.address, seed, space, programAddress: TOKEN_2022_PROGRAM_ADDRESS }),
+        getAssignWithSeedInstruction({ account: mint, baseAccount: issuer, base: issuer.address, seed, programAddress: TOKEN_2022_PROGRAM_ADDRESS }),
+      ]
+    : [
+        getCreateAccountWithSeedInstruction({
+          payer: issuer,
+          newAccount: mint,
+          base: issuer.address,
+          seed,
+          amount: rent,
+          space,
+          programAddress: TOKEN_2022_PROGRAM_ADDRESS,
+        }),
+      ];
   const [ata] = await findAssociatedTokenPda({ owner: holder, mint, tokenProgram: TOKEN_2022_PROGRAM_ADDRESS });
   const instructions: Instruction[] = [
-    getCreateAccountWithSeedInstruction({
-      payer: issuer,
-      newAccount: mint,
-      base: issuer.address,
-      seed: locus(p.id),
-      amount: await client.getMinimumBalance(getMintSize(exts)),
-      space: getMintSize(exts.slice(0, 1)),
-      programAddress: TOKEN_2022_PROGRAM_ADDRESS,
-    }),
+    ...create,
     getInitializeMetadataPointerInstruction({ mint, authority: none(), metadataAddress: some(mint) }),
     getInitializeMint2Instruction({ mint, decimals: 0, mintAuthority: issuer.address, freezeAuthority: none() }),
     getInitializeTokenMetadataInstruction({
@@ -224,17 +252,17 @@ export async function issue(
   return { id: locus(p.id), coin: mint, status: "created", signature: result.context.signature };
 }
 
-function check(mint: Account<Mint>, p: Provenance, md: ReturnType<typeof metadata>, issuer: Address) {
+function check(mint: Account<Mint>, p: Provenance, md: ReturnType<typeof metadata>) {
   const fail = (what: string) => {
     throw new Refusal("coin_mismatch", `${mint.address}: ${what}`);
   };
   const { data } = mint;
-  if (data.supply !== p.length || data.decimals !== 0) fail("supply is not the length in bases");
+  if (data.supply > p.length || data.decimals !== 0) fail("supply is more than the length in bases");
   if (isSome(data.mintAuthority) || isSome(data.freezeAuthority)) fail("coin still has an authority");
   const exts = isSome(data.extensions) ? data.extensions.value : [];
   const tm = exts.find((e) => e.__kind === "TokenMetadata");
   if (!tm || tm.__kind !== "TokenMetadata") return fail("no token metadata");
-  if (isSome(tm.updateAuthority)) fail(`metadata is still updatable by ${tm.updateAuthority.value === issuer ? "the issuer" : tm.updateAuthority.value}`);
+  if (isSome(tm.updateAuthority)) fail(`metadata is still updatable by ${tm.updateAuthority.value}`);
   if (tm.name !== md.name || tm.symbol !== md.symbol || tm.uri !== md.uri) fail("name, symbol or uri differs");
   const got = JSON.stringify([...tm.additionalMetadata]);
   if (got !== JSON.stringify(md.fields)) fail(`fields are ${got}`);
