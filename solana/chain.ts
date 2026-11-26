@@ -38,12 +38,12 @@ export async function chromosome(rpc: Rpc, contract: string, id: bigint, scan: S
   if (!at) throw new Error(`no ${block} block`);
   const tip = BigInt(at);
   const tag = `0x${tip.toString(16)}`;
-  let root: string;
+  let root = "";
   try {
     root = (await call(rpc, contract, "rootOf", id, tag)).slice(2);
-  } catch {
-    throw new Refusal("unknown_token", `no Bases token ${locus(id)} at block ${tip}`);
-  }
+  } catch {}
+  // "0x" means no contract at this block yet, e.g. a deployment that has not finalized.
+  if (root.length !== 64) throw new Refusal("unknown_token", `no Bases token ${locus(id)} at block ${tip}`);
   const length = BigInt(await call(rpc, contract, "lengthOf", id, tag));
   const prints = BigInt(await call(rpc, contract, "printsOf", id, tag));
   const head = (await call(rpc, contract, "headOf", id, tag)).slice(2);

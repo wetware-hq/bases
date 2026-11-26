@@ -250,6 +250,7 @@ describe("bases on anvil", { skip: !ANVIL && "anvil not installed" }, () => {
       const other = await chromosome(rpc, bases, chainRoot(unprinted.salt, unprinted.seq).id, { block: "latest" });
       refuses("unprinted", () => provenance(unprinted, other));
       await assert.rejects(chromosome(rpc, bases, 1n, { block: "latest" }), (e: unknown) => e instanceof Refusal && e.code === "unknown_token");
+      await assert.rejects(chromosome(rpc, bases, id, { block: "earliest" }), (e: unknown) => e instanceof Refusal && e.code === "unknown_token");
     } finally {
       node.kill();
     }
