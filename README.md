@@ -32,6 +32,20 @@ Minting takes two transactions, so a root waiting in the mempool cannot be copie
 - Nothing is burned or rewritten. Transfers are plain ERC-721, and the new holder gets the right to record prints.
 - `tokenURI(id)` is the helix page `<wiki>dna:<locus(id)>`, where `locus(id)` is `id` as 32 lowercase hex characters, so the helix ID and the token id are the same number ([wetware-hq/helix](https://github.com/wetware-hq/helix)).
 
+## Tensor map
+
+`tensorOf(id)` returns the token as a `tmap1` tensor map of kind `token`, the stack's universal tensor form ([wetware-hq/web](https://github.com/wetware-hq/web) contract §14): named tensors with TensorFlow `DataType` codes, row-major little-endian, names ascending. `sha256` of the bytes is the token's tensor root.
+
+| Tensor | dtype | Shape | Value |
+|---|---|---|---|
+| `head` | uint8 | `[32]` | `headOf(id)` |
+| `id` | uint8 | `[16]` | the 128-bit token id, big-endian |
+| `length` | uint64 | `[]` | `lengthOf(id)` |
+| `prints` | uint64 | `[]` | `printsOf(id)` |
+| `root` | uint8 | `[32]` | `rootOf(id)` |
+
+The map is a view of the token: roots and counts, never a base, like the chain itself. `solana/coin.ts` `tokenTensor` writes the same bytes off-chain, and both tests pin the bytes web's `ref/tensor.py` writes for the same token.
+
 ## Solana coin
 
 Each chromosome also gets one Solana coin ([`solana/`](solana)): a Token-2022 mint whose unit is the base, so its supply is `length` with 0 decimals. After creation it has no mint, freeze or metadata authority, so supply and metadata are fixed. The coin is issued only if the chromosome passed through every layer of the stack:
