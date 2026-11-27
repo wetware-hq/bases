@@ -267,3 +267,31 @@ function check(mint: Account<Mint>, p: Provenance, md: ReturnType<typeof metadat
   const got = JSON.stringify([...tm.additionalMetadata]);
   if (got !== JSON.stringify(md.fields)) fail(`fields are ${got}`);
 }
+
+/** A chromosome as a `tmap1` tensor map of kind `token` (wetware-hq/web contract §14), byte for byte what
+ *  `Bases.tensorOf` returns: head, id, root as uint8 tensors; length, prints as uint64 scalars. No base. */
+export function tokenTensor(c: { id: bigint; root: string; length: bigint; prints: bigint; head: string }): Buffer {
+  const bytes32 = (h: string, n = 32) => {
+    const b = Buffer.from(h.replace(/^0x/, ""), "hex");
+    if (b.length !== n) throw new Refusal("bad_root", `${h} is not ${n} bytes`);
+    return b;
+  };
+  const u64 = (v: bigint) => {
+    if (v < 0n || v >= 1n << 64n) throw new Refusal("bad_value", `${v} is not a uint64`);
+    const b = Buffer.alloc(8);
+    b.writeBigUInt64LE(v);
+    return b;
+  };
+  const vec = (name: string, data: Buffer) => {
+    const dim = Buffer.alloc(4);
+    dim.writeUInt32LE(data.length);
+    return Buffer.concat([Buffer.from([name.length]), Buffer.from(name), Buffer.from([4, 1]), dim, data]);
+  };
+  const scalar = (name: string, v: bigint) => Buffer.concat([Buffer.from([name.length]), Buffer.from(name), Buffer.from([23, 0]), u64(v)]);
+  const id = Buffer.from(c.id.toString(16).padStart(32, "0"), "hex");
+  if (id.length !== 16) throw new Refusal("bad_value", `id ${c.id} is not 128 bits`);
+  return Buffer.concat([
+    Buffer.from("tmap1"), Buffer.from([5]), Buffer.from("token"), Buffer.from([5, 0]),
+    vec("head", bytes32(c.head)), vec("id", id), scalar("length", c.length), scalar("prints", c.prints), vec("root", bytes32(c.root)),
+  ]);
+}

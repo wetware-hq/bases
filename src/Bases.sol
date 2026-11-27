@@ -124,6 +124,31 @@ contract Bases is ERC721 {
         return string(out);
     }
 
+    /// @notice The token as a `tmap1` tensor map of kind `token` (wetware-hq/web contract §14): five named tensors
+    ///         with TensorFlow DataType codes, names ascending. `sha256` of these bytes is the token's tensor root.
+    ///         Roots and counts only, never a base: head, id, root are uint8 [32] / [16] / [32]; length, prints uint64 [].
+    function tensorOf(uint256 id) external view returns (bytes memory) {
+        _requireOwned(id);
+        Chromosome storage c = _chromosomes[id];
+        return abi.encodePacked(
+            "tmap1",
+            uint8(5),
+            "token",
+            uint16(0x0500),
+            abi.encodePacked(uint8(4), "head", uint8(4), uint8(1), uint32(0x20000000), c.head),
+            abi.encodePacked(uint8(2), "id", uint8(4), uint8(1), uint32(0x10000000), bytes16(uint128(id))),
+            abi.encodePacked(uint8(6), "length", uint8(23), uint8(0), _le64(c.length)),
+            abi.encodePacked(uint8(6), "prints", uint8(23), uint8(0), _le64(c.prints)),
+            abi.encodePacked(uint8(4), "root", uint8(4), uint8(1), uint32(0x20000000), c.root)
+        );
+    }
+
+    function _le64(uint64 v) private pure returns (bytes8 out) {
+        for (uint256 i = 0; i < 8; i++) {
+            out |= bytes8(bytes1(uint8(v >> (8 * i)))) >> (8 * i);
+        }
+    }
+
     function tokenURI(uint256 id) public view override returns (string memory) {
         _requireOwned(id);
         return string.concat(_wiki, locus(id));

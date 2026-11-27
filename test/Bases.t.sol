@@ -35,6 +35,56 @@ contract BasesTest is Test {
         return _mintAs(to, to, ROOT, 4);
     }
 
+    /// tmap1 bytes of the minted ROOT token, written by wetware-hq/web ref/tensor.py `pack`, and their sha256.
+    bytes constant TENSOR =
+        hex"746d61703105746f6b656e05000468656164040120000000df47caf7386c472bb184f0f24c1728b80ddb649513a36a58aa53e2622c2b5a8e026964040110000000df47caf7386c472bb184f0f24c1728b8066c656e67746817000400000000000000067072696e74731700000000000000000004726f6f74040120000000df47caf7386c472bb184f0f24c1728b80ddb649513a36a58aa53e2622c2b5a8e";
+    bytes32 constant TENSOR_ROOT = 0x09901c6e1cf5a24598dbcaa6d2a6e1b1fa4b1a37928a11c9df72f4782e2b4887;
+
+    function test_TensorMapIsWebTmap1() public {
+        uint256 id = _mint(alice);
+        assertEq(bases.tensorOf(id), TENSOR);
+        assertEq(sha256(bases.tensorOf(id)), TENSOR_ROOT);
+    }
+
+    function test_TensorMapFollowsPrints() public {
+        uint256 id = _mint(alice);
+        vm.prank(alice);
+        bases.polymerize(id, RECEIPT);
+        bytes memory t = bases.tensorOf(id);
+        assertEq(t.length, TENSOR.length);
+        bytes32 head = keccak256(abi.encodePacked(ROOT, RECEIPT));
+        bytes32 got;
+        assembly {
+            got := mload(add(t, add(32, 24)))
+        }
+        assertEq(got, head);
+        assertEq(uint8(t[107]), 1); // prints = 1, little-endian, after "prints" dtype 23 rank 0
+        assertTrue(sha256(t) != TENSOR_ROOT);
+    }
+
+    function test_TensorOfUnknownTokenReverts() public {
+        vm.expectRevert(abi.encodeWithSelector(IERC721Errors.ERC721NonexistentToken.selector, 7));
+        bases.tensorOf(7);
+    }
+
+    function testFuzz_TensorMapCounts(uint64 length, uint8 prints) public {
+        vm.assume(length > 0);
+        uint256 id = _mintAs(alice, alice, ROOT, length);
+        for (uint256 i = 0; i < prints; i++) {
+            vm.prank(alice);
+            bases.polymerize(id, bytes32(i + 1));
+        }
+        bytes memory t = bases.tensorOf(id);
+        uint64 len;
+        uint64 pr;
+        for (uint256 i = 0; i < 8; i++) {
+            len |= uint64(uint8(t[90 + i])) << uint64(8 * i);
+            pr |= uint64(uint8(t[107 + i])) << uint64(8 * i);
+        }
+        assertEq(len, length);
+        assertEq(pr, prints);
+    }
+
     function test_EventTopicsMatchSolanaIssuer() public pure {
         assertEq(Bases.Committed.selector, 0x8e3584d232d0e22e18aa185ea690a639a6c0f6830722f402e250130cfeae923d);
         assertEq(Bases.Polymerized.selector, 0xd4d8d095c60c0dfb06f4fedf3c8ad252c56c26cb7d7e77a9ac7d1fe077b28428);

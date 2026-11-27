@@ -8,7 +8,7 @@ import { litesvm } from "@solana/kit-plugin-litesvm";
 import { airdropSigner, generatedSigner } from "@solana/kit-plugin-signer";
 import { TOKEN_2022_PROGRAM_ADDRESS, decodeMint, fetchToken, findAssociatedTokenPda, getBurnInstruction } from "@solana-program/token-2022";
 import { chromosome, evm, token } from "./chain.ts";
-import { type Asset, Refusal, chainRoot, coinAddress, issue, locus, metadata, provenance, readFasta, readLoop } from "./coin.ts";
+import { type Asset, Refusal, chainRoot, coinAddress, issue, locus, metadata, provenance, readFasta, readLoop, tokenTensor } from "./coin.ts";
 
 const sha = (s: string | Buffer) => createHash("sha256").update(s).digest();
 const hex = (s: string | Buffer) => sha(s).toString("hex");
@@ -254,5 +254,31 @@ describe("bases on anvil", { skip: !ANVIL && "anvil not installed" }, () => {
     } finally {
       node.kill();
     }
+  });
+});
+
+describe("tmap1 token tensor map", () => {
+  // keccak256("salt || ACGT") minted with length 4, as in test/Bases.t.sol; bytes from web ref/tensor.py pack.
+  const ROOT = "0xdf47caf7386c472bb184f0f24c1728b80ddb649513a36a58aa53e2622c2b5a8e";
+  const TENSOR_ROOT = "09901c6e1cf5a24598dbcaa6d2a6e1b1fa4b1a37928a11c9df72f4782e2b4887";
+  const minted = { id: BigInt(ROOT) >> 128n, root: ROOT, length: 4n, prints: 0n, head: ROOT };
+
+  test("is the bytes Bases.tensorOf returns", () => {
+    const t = tokenTensor(minted);
+    assert.equal(t.length, 158);
+    assert.equal(sha(t).toString("hex"), TENSOR_ROOT);
+    assert.equal(t.subarray(0, 13).toString("latin1"), "tmap1\x05token\x05\x00");
+  });
+
+  test("holds no base and changes with prints", () => {
+    const t = tokenTensor({ ...minted, prints: 1n });
+    assert.equal(t.readBigUInt64LE(107), 1n);
+    assert.notEqual(sha(t).toString("hex"), TENSOR_ROOT);
+    assert.ok(!t.includes(Buffer.from("ACGT")));
+  });
+
+  test("refuses a short root and an oversized count", () => {
+    assert.throws(() => tokenTensor({ ...minted, root: "0x12" }), (e: Refusal) => e.code === "bad_root");
+    assert.throws(() => tokenTensor({ ...minted, prints: 1n << 64n }), (e: Refusal) => e.code === "bad_value");
   });
 });
