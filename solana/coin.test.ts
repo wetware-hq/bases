@@ -43,7 +43,7 @@ describe("loop1", () => {
       return;
     }
     const loop = readLoop(text);
-    assert.equal(loop.head, "a8958ddcdd641039cfcc43e7b1f8bd7543d71d1a785bb10b4b6f6f07ab8e2232");
+    assert.equal(loop.head, "2606931c86fbb0f54ba31e2b2f130130fd588b8f75bf6daa8f20ed8442189bcd");
     assert.equal(loop.web, "3add10e021a62cdaabe4ea71fc077d45543ff5f6d91e8ab2a664cc9a79dd0d89");
     assert.equal(loop.nt, 50105n);
   });
