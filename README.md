@@ -46,6 +46,21 @@ Minting takes two transactions, so a root waiting in the mempool cannot be copie
 
 The map is a view of the token: roots and counts, never a base, like the chain itself. `solana/coin.ts` `tokenTensor` writes the same bytes off-chain, and both tests pin the bytes web's `ref/tensor.py` writes for the same token.
 
+## K-lines
+
+A K-line ([wetware-hq/web](https://github.com/wetware-hq/web) contract §17, `kline1`) is a composition function over shallow networks: an ordered list of stage webs that extends a deep net, named by its 32-byte K-line head. Each stage is a web, so it has a `dna1` sequence and can be minted here as a chromosome. Bases represents a K-line as **the ordered list of its stage token ids**. It adds no contract, field or event.
+
+```text
+kline1 head      = sha256 chain over the stage web roots           # web §17, off chain
+stage i          = token id_i, root_i = sha256(salt_i || dna1(web_i))
+representation   = [eip155:<chain>/erc721:<bases>/<id_0>, ..., <id_(m-1)>]
+artefact         = one print of each stage: receipt_i = head of stage i's loop1 read-back
+```
+
+- **Roots never cross.** The K-line names a stage by its web root, and the token names it by a salted chain root. Only the holder of `salt_i` can show that `rootOf(id_i)` is `sha256(salt_i || dna1(web_i))`. So a K-line reaches a chromosome by its token id, never by comparing roots (web §13, S3).
+- **Prints are per stage.** Each stage token records its own prints. A printed K-line is one `Polymerized` row per stage whose receipt is a supporting `expect=intact` read-back. [wetware-hq/med3](https://github.com/wetware-hq/med3) §10 sells a K-line this way and captures payment only when every stage has such a row.
+- **No base on chain.** The list holds only token ids, and each token holds only a root and a length, so a K-line that is on chain still exposes no base.
+
 ## Solana coin
 
 Each chromosome also gets one Solana coin ([`solana/`](solana)): a Token-2022 mint whose unit is the base, so its supply is `length` with 0 decimals. After creation it has no mint, freeze or metadata authority, so supply and metadata are fixed. The coin is issued only if the chromosome passed through every layer of the stack:
